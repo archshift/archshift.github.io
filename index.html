@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Gui Andrade</title>
+        <meta name="viewport" content="width=device-width" />
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+        <link rel="stylesheet" type="text/css" href="style.css" />
+        
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-31609280-3"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-31609280-3');
+</script>
+
+    </head>
+    <body>
+        <div id="title">
+            <h1>Gui Andrade</h1>
+            <p><a href="https://github.com/archshift/">
+                <img src="GitHub.png" alt="GitHub Profile" height="30pt" />
+            </a></p>
+        </div>
+
+        <h2>Blog Posts</h2>
+        <div class="blog-box">
+            <a href="/blog-posts/most-dangerous-memory.html">
+                <div class="post">
+                    <div class="name">The Most Dangerous Memory</div>
+                    <div class="date">2019.11.05</div>
+                </div>
+            </a>
+            <a href="/blog-posts/macro-assembly-codegen.html">
+                <div class="post">
+                    <div class="name">Compile-time coprocessor codegen, with Rust macros</div>
+                    <div class="date">2019.05.03</div>
+                </div>
+            </a>
+            <a href="/blog-posts/compile-time-unions.html">
+                <div class="post">
+                    <div class="name">Crafting a Rust enum with variants decided at compile-time</div>
+                    <div class="date">2019.01.19</div>
+                </div>
+            </a>
+            <a href="/blog-posts/unboxed-trait-objects.html">
+                <div class="post">
+                    <div class="name">Storing unboxed trait objects in Rust</div>
+                    <div class="date">2018.11.10</div>
+                </div>
+            </a>
+            <a href="/blog-posts/bitfields.html">
+                <div class="post">
+                    <div class="name">Hacking around the Rust type-system to provide ergonomic bitfields</div>
+                    <div class="date">2018.09.03</div>
+                </div>
+            </a>
+        </div>
+        
+
+        <h2>Projects</h2>
+        <div class="project-box">
+            <div class="project">
+                <h3 class="proj-label">
+                    <pre>llama</pre>
+                    <pre class="lang"><a href="https://github.com/archshift/llama">src.rs</a></pre>
+                </h3>
+                <h4>ARM9 emulator targeting the Nintendo 3DS security processor</h4>
+                
+                <label>
+                    <input class="proj-desc-checkbox" style="display: none" type="checkbox" checked="checked" />
+                    <div class="proj-desc">
+                        <p>Multi-threaded ARM9 emulator capable of running homebrew.</p>
+                        <p>Implemented peripherals include cryptographic modules (AES/RSA/SHA) and the SD card and eMMC controller.</p>
+                        <p>Features a Qt-powered user interface as well as two debug interfaces: built-in and gdbserver.</p>
+                    </div>
+                </label>
+            </div>
+            <div class="project">
+                <h3 class="proj-label">
+                    <pre>crossbar9</pre>
+                    <pre class="lang"><a href="https://github.com/archshift/crossbar9">src.rs</a></pre>
+                </h3>
+                <h4>Test suite targeting the 3DS security processor and peripherals</h4>
+                
+                <label>
+                    <input class="proj-desc-checkbox" style="display: none" type="checkbox" checked="checked" />
+                    <div class="proj-desc">
+                        <p>Features tests ranging from CPU instruction behavior to timers, DMA, crypto modules and memory caching.</p>
+                        <p>Designed as a means of documentation for 3DS behavior and to ensure emulation correctness.</p>
+                    </div>
+                </label>
+            </div>
+            <div class="project">
+                <h3 class="proj-label">
+                    <pre>decrypt9</pre>
+                    <pre class="lang"><a href="https://github.com/archshift/Decrypt9">src.c</a></pre>
+                </h3>
+                <h4>Utility to decrypt 3DS data for inspection off-device</h4>
+                
+                <label>
+                    <input class="proj-desc-checkbox" style="display: none" type="checkbox" checked="checked" />
+                    <div class="proj-desc">
+                        <p>Originally a port of earlier efforts to a new 3DS software version, Decrypt9 grew into a fully-fledged data decryption suite.</p>
+                        <p>Continued extension by d0k3 yielded <a href="https://github.com/d0k3/Decrypt9WIP">Decrypt9WIP</a>, capable of even more advanced functionality.</p>
+                    </div>
+                </label>
+            </div>
+            <div class="project">
+                <h3 class="proj-label">
+                    <pre>havoc</pre>
+                    <pre class="lang"><a href="https://github.com/archshift/havoc">src.cpp</a></pre>
+                </h3>
+                <h4>A portable reimplementation of the CM Storm Havoc gaming mouse control software</h4>
+                
+                <label>
+                    <input class="proj-desc-checkbox" style="display: none" type="checkbox" checked="checked" />
+                    <div class="proj-desc">
+                        <p>Allows configuration of a proprietary gaming mouse on unsupported platforms, particularly Linux.</p>
+                        <p>Functions according to behavior reverse-engineered from closed-source software.</p>
+                        <p>Uses libusb to broadcast USB packets that alter color, sensitivity, and other mouse behavior.</p>
+                    </div>
+                </label>
+            </div>
+        </div>
+
+        <h2>Experiments</h2>
+        <div class="project-box">
+            <div class="project">
+                <h3 class="proj-label">
+                    <pre>bitutils</pre>
+                    <pre class="lang"><a href="https://github.com/archshift/bitutils-rs">src.rs</a></pre>
+                </h3>
+                <h4>Ergonomic bitfields implemented in Rust macros</h4>
+            </div>
+            <div class="project">
+                <h3 class="proj-label">
+                    <pre>rjit</pre>
+                    <pre class="lang"><a href="https://github.com/archshift/rjit">src.rs</a></pre>
+                </h3>
+                <h4>Barebones Just-In-Time compilation manager</h4>
+            </div>
+            <div class="project">
+                <h3 class="proj-label">
+                    <pre>u2^N</pre>
+                    <pre class="lang"><a href="https://github.com/archshift/u2N">src.rs</a></pre>
+                </h3>
+                <h4>Attempt at fixed-size big number arithmetic for embedded systems</h4>
+            </div>
+            <div class="project">
+                <h3 class="proj-label">
+                    <pre>dynstack</pre>
+                    <pre class="lang"><a href="https://github.com/archshift/dynstack">src.rs</a></pre>
+                </h3>
+                <h4>Stack for Rust dynamically-sized types that minimizes allocations</h4>
+            </div>
+            <div class="project">
+                <h3 class="proj-label">
+                    <pre>anymsg</pre>
+                    <pre class="lang"><a href="https://github.com/archshift/anymsg">src.rs</a></pre>
+                </h3>
+                <h4>Low-overhead type-routed message passing architecture</h4>
+            </div>
+            <div class="project">
+                <h3 class="proj-label">
+                    <pre>dmenu-quicklaunch</pre>
+                    <pre class="lang"><a href="https://github.com/archshift/dmenu-quicklaunch">src.rs</a></pre>
+                </h3>
+                <h4>Low-latency application launcher for Linux</h4>
+            </div>
+        </div>
+    </body>
+</html>

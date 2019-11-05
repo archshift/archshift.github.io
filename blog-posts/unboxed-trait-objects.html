@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width" />
+    <link rel="stylesheet" type="text/css" href="/style.css">
+    <link rel="stylesheet" type="text/css" href="/prism.css">
+    <script src="/prism.js"></script> 
+    <title>Storing unboxed trait objects in Rust</title>
+    
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-31609280-3"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-31609280-3');
+</script>
+
+</head>
+<body>
+    <div id="title">
+        <h1>a blog</h1>
+        <p>by <a href="/">
+            Gui Andrade
+        </a></p>
+    </div>
+
+    <h1>Storing unboxed trait objects in Rust</h1>
+<p>This blog post will outline the creation of <a href="https://github.com/archshift/dynstack"><code>dynstack</code></a>, a stack datastructure that stores trait objects <em>unboxed</em> to minimize the number of heap allocations necessary.</p>
+<h2>Part 1: Implementing polymorphism</h2>
+<p>Rust, not being an object-oriented language, doesn't quite do inheritence like the others. In C++ or Java, subclasses extend superclasses. In Rust, structs implement traits.</p>
+<p>This section is designed to provide background about how C++ and Rust implement polymorphism. If you're already familiar with vtables and fat pointers, jump ahead to <a href="#part-2-storing-trait-objects">Part 2</a>.</p>
+<h3>Virtual calls in C++</h3>
+<p>Consider a typical example of inheritance in C++:</p>
+<pre><code class="language-cpp">class Animal {
+public:
+    virtual void MakeSound() = 0;
+};
+
+class Dog : public Animal {
+public:
+    void MakeSound() {
+        printf(&quot;Ruff\n&quot;);
+    }
+};
+</code></pre>
+
+<p>With C++ inheritance, we can think of <code>Dog</code> as having an implicit private member: <code>DogVtable *vtable</code>, with the following definition:</p>
+<pre><code class="language-cpp">struct DogVtable {
+    void (*MakeSound)(Dog*);
+    // Some miscellaneous stuff.
+};
+</code></pre>
+
+<p>If we upcast <code>Dog</code> to <code>Animal</code>, and call the <code>MakeSound</code> method, we in essence are doing the following:</p>
+<pre><code class="language-cpp">struct AnimalVtable {
+    void (*MakeSound)(Animal*);
+    // etc.
+}
+
+Dog d();
+Dog *dog = &amp;d;
+dog-&gt;vtable-&gt;MakeSound(dog); // prints &quot;Ruff&quot;
+
+Animal *animal = &amp;d;
+animal-&gt;vtable-&gt;MakeSound(animal); // prints &quot;Ruff&quot;
+</code></pre>
+
+<p>Note why the second invocation works. <code>animal</code> <em>is</em> <code>dog</code>; they both point to the same spot in memory. Assuming both <code>Dog</code> and <code>Animal</code> have their <code>vtable</code> members at the same offset, and assuming both vtables have the same layout (spoiler: they do), both lines are identical.</p>
+<p>If you can make sense of x86 assembly, I encourage you to play around with <a href="https://rust.godbolt.org/z/TjNGfx">this assembly explorer for C++ virtual calls</a>.</p>
+<h3>Virtual calls in Rust</h3>
+<p>In Rust, things are a bit different. Traits have no data members, and any pre-implemented trait functions are duplicated among implementers. This means that <strong>unless you're using a trait object, Rust doesn't use vtables</strong>.</p>
+<p>Trait objects complicate things, though. Imagine you want to have a vector of items that are all <code>Animal</code>s, but may otherwise be of different types.</p>
+<pre><code class="language-rust">// Consider the following definitions:
+trait Animal {
+    fn make_sound(&amp;self);
+}
+
+struct Dog;
+impl Animal for Dog {
+    fn make_sound(&amp;self) { println!(&quot;Ruff&quot;); }
+}
+
+struct Cat;
+impl Animal for Cat {
+    fn make_sound(&amp;self) { println!(&quot;Meow&quot;); }
+}
+
+struct Chinchilla;
+impl Animal for Chinchilla {
+    fn make_sound(&amp;self) { println!(&quot;...&quot;); }
+}
+
+// Accompanied with the following code:
+let animals = Vec::&lt;dyn Animal&gt;::new();
+animals.push(Dog);
+animals.push(Cat);
+animals.push(Chinchilla);
+
+for animal in animals {
+    animal.make_sound();
+}
+</code></pre>
+
+<p>Sadly, this example <strong>doesn't work</strong>. And it doesn't work because <code>dyn Animal</code> isn't a real object, it's a <strong>trait object</strong>.</p>
+<p>You can think of a trait object as a sort of upcasted representation of a struct. Obviously, the only methods you can call on a trait object are the ones defined in its respective trait.</p>
+<p>And there are two other things that are important to keep in mind with trait objects:</p>
+<h5>Note 1: trait objects are Dynamically Sized Types (DSTs).</h5>
+<p>This is pretty easy to reason about. Clearly, all of <code>Dog</code>, <code>Cat</code>, and <code>Chinchilla</code> have no members, so they have size 0. But maybe <code>Kangaroo</code> has a <code>&amp;Joey</code> member, which makes it size 8. What size does <code>dyn Animal</code> have, then? </p>
+<p>Well, it doesn't have a (static) size. It's dynamically sized, so we can only actually know at runtime for some specific instantiation. This also means that <strong>we can't store trait objects on the stack</strong>, because Rust doesn't permit variable stack usage (recursion aside).</p>
+<h5>Note 2: a pointer to a trait object encodes both its <em>data address</em> and its <em>vtable address</em>.</h5>
+<p>This shows that trait object pointers are <strong>fat pointers</strong>. On a 64-bit system, this fat pointer occupies 128 bits for its two component addresses.</p>
+<p><strong><em>Aside</em></strong>: The representation for a fat pointer, as of Rust 1.32, is a packed <code>(*mut Struct, *const Vtable)</code> tuple. Unfortunately, there's no guarantee that fat pointers will continue to be represented this way in the Future. Still, there's no foreseeable reason it would change.</p>
+<p>To illustrate how these come together, let's write some Rust pseudocode that parallels the C++ example above:</p>
+<pre><code class="language-rust">let d: Dog = Dog;
+let dog: &amp;Dog = &amp;d;
+Dog::make_sound(dog); // prints &quot;Ruff&quot;
+
+let animal: &amp;dyn Animal = &amp;d;
+let (animal_data, animal_vtable) = decompose_fat_pointer(animal);
+((*animal_vtable).make_sound)(animal_data); // prints &quot;Ruff&quot;
+</code></pre>
+
+<p>Again, <code>animal_data</code> <em>is</em> <code>dog</code>. They're both pointers to the exact same data. Also note that no vtable gets used unless we upcast to <code>Animal</code>.</p>
+<p>Again, if you can make sense of x86 assembly, I encourage you to play around with <a href="https://rust.godbolt.org/z/xiONfS">this assembly explorer for Rust virtual calls</a>.</p>
+<h2>Part 2: Storing trait objects</h2>
+<p>Generally, if we want to store trait objects, we have to allocate them on the heap.
+The <code>Box</code> smart pointer handles this nicely for us.</p>
+<pre><code class="language-rust">let animals = Vec::&lt;Box&lt;dyn Animal&gt;&gt;::new();
+animals.push(Box::new(Dog));
+animals.push(Box::new(Cat));
+animals.push(Box::new(Chinchilla));
+
+for animal in animals {
+    animal.make_sound();
+}
+</code></pre>
+
+<p>And it works!</p>
+<p>The only problem here is that we need separate allocations every single time we push to the <code>Vec</code>. This is bad for performance!</p>
+<h3>We can do better</h3>
+<p>A <code>Vec</code> of size-N unboxed objects is laid out the following way in memory:</p>
+<pre><code>  Offset | Data
+=========|=======
+ +0      | item0
+ +N      | item1
+ +2N     | item2
+ ...     | ...
+</code></pre>
+
+<p>While a <code>Vec</code> of boxed trait objects is laid out like so:</p>
+<pre><code>  Offset |          Data
+=========|=======================
+ +0      | &amp;item0, &amp;item0_vtable
+ +16     | &amp;item1, &amp;item1_vtable
+ +32     | &amp;item2, &amp;item2_vtable
+ ...     | ...
+</code></pre>
+
+<p><strong>I propose a data structure called <code>DynStack</code></strong>, which takes elements from both of the above. <code>DynStack</code> has two interior data structures:
+1. An item descriptor table
+2. Contiguous item memory</p>
+<p>The item memory is conceptually simple. Consider three trait objects of sizes I, J, and K. Pushing them to the stack would result in the following:</p>
+<pre><code>         Offset         | Data
+========================|=======
+ +0                     | item0
+ +I (+ padding)         | item1
+ +I + J (+ padding)     | item2
+ +I + J + K (+ padding) | item3
+</code></pre>
+
+<p>The item descriptor table is laid out similarly to the <code>Vec</code> of boxed trait objects, with one important caveat. In place of pointers to individual items, we store offsets.</p>
+<pre><code>  Offset |              Data
+=========|================================
+ +0      | 0,               &amp;item0_vtable
+ +16     | I + padding,     &amp;item1_vtable
+ +32     | I + J + padding, &amp;item2_vtable
+</code></pre>
+
+<p>Indexing an item still has runtime O(1). We just lookup the descriptor entry at <code>i</code>:</p>
+<pre><code class="language-rust">let (offset, vtable_ptr) = self.descriptors[i];
+return create_fat_pointer(&amp;self.data[offset], vtable_ptr)
+</code></pre>
+
+<p>More importantly, the number of memory allocations is now O(log N), as both the item descriptor table and contiguous item memory double in size upon reaching capacity.</p>
+<h2>Part 3: Stable Rust <code>DynStack</code></h2>
+<p>How can we implement <code>DynStack::push</code>? Note that we need to move the trait object into our data structure.</p>
+<p>Our structure definition:</p>
+<pre><code class="language-rust">struct DynStack&lt;T: ?Sized&gt; {
+    // ...
+}
+</code></pre>
+
+<p>And recall that we can't take trait object parameters by value.</p>
+<h4>First attempt: basic generics/impl Trait</h4>
+<pre><code class="language-rust">impl&lt;T: ?Sized&gt; DynStack&lt;T&gt; {
+    fn push&lt;I&gt;(&amp;mut self, item: I) where I: T {}
+    // error[E0404]: expected trait, found type parameter `T`
+}
+</code></pre>
+
+<p><code>impl T</code> has the same issue. Turns out, there's no way to parametrize your type over a trait :(</p>
+<h4>Second attempt: <code>CoerceUnsized</code></h4>
+<p>Turns out, Rust has a trait available for this exact purpose.</p>
+<pre><code class="language-rust">impl&lt;T: ?Sized&gt; DynStack&lt;T&gt; {
+    fn push&lt;I&gt;(&amp;mut self, mut item: I)
+        where *mut I: CoerceUnsized&lt;*mut T&gt; {
+        // ...
+    }
+}
+</code></pre>
+
+<p>And it works! Unfortunately, <code>CoerceUnsized</code> is <em>unstable</em>. And it doesn't look like it'll be stabilized any time soon. Damn.</p>
+<h4>Third attempt: macros</h4>
+<p>First, I define a <code>push</code> function that just takes in a mutable reference to T.</p>
+<pre><code class="language-rust">impl&lt;T: ?Sized&gt; DynStack&lt;T&gt; {
+    unsafe fn push(&amp;mut self, item: &amp;mut T) {
+        // ...
+    }
+}
+</code></pre>
+
+<p>Then, a safe macro that calls <code>push</code> while moving the value.</p>
+<pre><code class="language-rust">macro_rules! dyn_push {
+    { $stack:expr, $item:expr } =&gt; {{
+        let mut t = $item;
+
+        unsafe { $stack.push(&amp;mut t) };
+        ::std::mem::forget(t);
+    }}
+}
+</code></pre>
+
+<p>We need to make sure to <code>forget</code> the item because we don't want to call its destructor twice. The <code>DynStack</code> will <code>Drop</code> all its items later.</p>
+<p>We just have one problem here: <code>Vec</code>. Turns out, <code>&amp;mut Vec&lt;K&gt;</code> will coerce into <code>&amp;mut [K]</code>, so push will take ownership of the slice and not the vector if we do the following:</p>
+<pre><code class="language-rust">let mut stack: DynStack&lt;[u8]&gt; = DynStack::new();
+let item = vec![0u8; 10000000];
+dyn_push!(stack, item);
+</code></pre>
+
+<p>And will then leak the <code>Vec</code>'s memory with the call to <code>forget</code>.</p>
+<h4>Fourth attempt: macros redux</h4>
+<p>All we have to do is change push's <code>&amp;mut T</code> argument to <code>*mut T</code>:</p>
+<pre><code class="language-rust">impl&lt;T: ?Sized&gt; DynStack&lt;T&gt; {
+    unsafe fn push(&amp;mut self, item: *mut T) {
+        // ...
+    }
+}
+</code></pre>
+
+<p>This allows Rust to correctly error on the vector pushing code above, because <code>&amp;mut Vec&lt;u8&gt;</code> won't coerce to <code>*mut [u8]</code>.</p>
+<h3>Actually implementing <code>push</code></h3>
+<p>This part is pretty simple. I'll spare you the details, but here's the pseudocode:</p>
+<pre><code class="language-rust">fn push(item_ptr) {
+    next_offset = align_to(self.data.end, item_ptr)
+    self.data.grow_to_accomodate(next_offset + sizeof *item_ptr)
+    self.descriptors.push((next_offset, vtable_of(item_ptr))
+    self.data.copy_into(item_ptr, next_offset)
+}
+</code></pre>
+
+<h2>Part 4: Benchmarks</h2>
+<p>Benchmarks done on a 12-core Ryzen CPU with 16GB RAM, running Linux.</p>
+<p><strong>TL;DR:</strong> <code>dynstack</code> beats an equivalent <code>Vec&lt;Box&lt;_&gt;&gt;</code> across the board, but seeing heavily task- and
+allocator-dependent performance boosts.</p>
+<h4><a href="https://github.com/archshift/dynstack/blob/e4271e545070cca6ee6495355fc794ff4e854086/benches/comparisons.rs#L12-L30">push_speed</a></h4>
+<p>This benchmark pushes 4x to a <code>Vec&lt;Box&lt;dyn Trait&gt;&gt;</code> / <code>DynStack&lt;dyn Trait&gt;</code> as quickly as possible, without popping.</p>
+<p><strong>Jemalloc (as of Rust 1.32):</strong></p>
+<pre><code>push_speed_naive        time:   [77.472 ns 79.771 ns 82.055 ns]
+push_speed_dynstack     time:   [72.303 ns 74.035 ns 75.572 ns]
+</code></pre>
+
+<p><strong>Linux system allocator (circa Rust 1.34):</strong></p>
+<pre><code>push_speed_naive        time:   [62.828 ns 63.456 ns 64.181 ns]
+push_speed_dynstack     time:   [37.408 ns 37.696 ns 37.989 ns]
+</code></pre>
+
+<h4><a href="https://github.com/archshift/dynstack/blob/e4271e545070cca6ee6495355fc794ff4e854086/benches/comparisons.rs#L32-L64">push_and_run</a></h4>
+<p>This benchmark pushes 100x to a <code>Vec&lt;Box&lt;Fn&gt;&gt;</code> / <code>DynStack&lt;Fn&gt;</code> and then runs the whole list sequentially.</p>
+<p><strong>Jemalloc (as of Rust 1.32):</strong></p>
+<pre><code>push_and_run_naive      time:   [1.9763 us 1.9779 us 1.9796 us]
+push_and_run_dynstack   time:   [1.5346 us 1.5366 us 1.5387 us]
+</code></pre>
+
+<p><strong>Linux system allocator (circa Rust 1.34):</strong></p>
+<pre><code>push_and_run_naive      time:   [3.5431 us 3.5534 us 3.5684 us]
+push_and_run_dynstack   time:   [1.8091 us 1.8118 us 1.8148 us]
+</code></pre>
+
+<h4><a href="https://github.com/archshift/dynstack/blob/e4271e545070cca6ee6495355fc794ff4e854086/benches/comparisons.rs#L66-L95">pseudorecursive2</a></h4>
+<p>This benchmark pushes once to a <code>Vec&lt;Box&lt;Fn&gt;&gt;</code> / <code>DynStack&lt;Fn&gt;</code>, then calls the closure, then pops it from the list. It does this 100x per iteration.</p>
+<p><strong>Jemalloc (as of Rust 1.32):</strong></p>
+<pre><code>pseudorecursive2_naive     time:   [1.5299 us 1.5307 us 1.5316 us]
+pseudorecursive2_dynstack  time:   [1.0138 us 1.0159 us 1.0188 us]
+</code></pre>
+
+<p><strong>Linux system allocator (circa Rust 1.34):</strong></p>
+<pre><code>pseudorecursive2_naive     time:   [1.1447 us 1.1455 us 1.1464 us]
+pseudorecursive2_dynstack  time:   [989.59 ns 991.74 ns 995.08 ns]
+</code></pre>
+</body>
+</html>

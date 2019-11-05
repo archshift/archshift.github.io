@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width" />
+    <link rel="stylesheet" type="text/css" href="/style.css">
+    <link rel="stylesheet" type="text/css" href="/prism.css">
+    <script src="/prism.js"></script> 
+    <title>Compile-time coprocessor codegen, with Rust macros</title>
+    
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-31609280-3"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-31609280-3');
+</script>
+
+</head>
+<body>
+    <div id="title">
+        <h1>a blog</h1>
+        <p>by <a href="/">
+            Gui Andrade
+        </a></p>
+    </div>
+
+    <h1>Compile-time coprocessor codegen, with Rust macros</h1>
+<h2>Motivation</h2>
+<p>The Nintendo 3DS uses an ARM standard peripheral, the CoreLink DMA engine, for copying memory among DRAM and memory-mapped peripherals.</p>
+<p>This DMA engine, unlike most other IO devices on the 3DS, actually has its own instruction set where the CPU merely uploads a stream of instructions for the peripheral to execute (other examples of this, on the 3DS, are the DSP audio processor and the PICA graphics chip).</p>
+<p>I’d like to compile and run DMA instructions in Rust, in a hopefully ergonomic manner, without needing to use any dynamic memory allocation. This imposes a particular constraint that I need to know the number of instruction bytes at compile time so I can use an appropriately-sized array.</p>
+<h2><a href="https://github.com/archshift/crossbar9/blob/8521e7077d00bd7958b6bb39b379c14becfc43b6/src/io/xdma.rs#L5-L106">Macro Implementation</a></h2>
+<p>Anytime I consider complex compile-time processing, macros are usually the solution. In this case, I could choose between generating byte arrays directly or emitting nested packed structs (which I would later have to transmute to some kind of byte pointer). I chose the former, as getting packed struct semantics right can be somewhat tricky.</p>
+<p>So my macro needed to do a few things:</p>
+<ol>
+<li>Take in a linear sequence of opcodes and their parameters, delimited by semicolons.</li>
+<li>Do some bookkeeping to keep track of the output position in the instruction buffer, as well as backward jump offsets for loops.</li>
+<li>Emit a sequence of bytes in an appropriately-sized <code>[u8; N]</code> array.</li>
+</ol>
+<p>Here’s the final syntax I achieve:</p>
+<pre><code class="language-rust">let program = xdma_compile! {
+    MOV(SAR, (src as u32));
+    MOV(CCR, (ctrl_big.val));
+    MOV(DAR, (dst as u32));
+    LP(0, (chunks as u8));
+        LD;
+        ST;
+    LPEND(0);
+    END
+};
+</code></pre>
+
+<h3>Constant array size</h3>
+<p>The simplest part of this implementation is computing the byte array size:</p>
+<pre><code class="language-rust">macro_rules! xdmainst_size {
+    (GO) =&gt; (6);
+    (END) =&gt; (1);
+    (KILL) =&gt; (1);
+    (FLUSHP) =&gt; (2);
+    (WFP) =&gt; (2);
+    // ...
+}
+</code></pre>
+
+<p>These constants are summed together with a one-liner in the <code>xdma_compile</code> macro.</p>
+<pre><code class="language-rust">const LEN: usize = 0 $(+ xdmainst_size!($inst_name))+;
+</code></pre>
+
+<h3>Code generation</h3>
+<p>Code generation for individual instructions, with the simple encoding of the CoreLink ISA, is also relatively easy to do. I use another macro to emit byte arrays of the appropriate length for some given instruction.</p>
+<pre><code class="language-rust">macro_rules! xdmainst {
+    (END) =&gt; ([0x00]);
+    (KILL) =&gt; ([0x01]);
+    (FLUSHP $which:expr) =&gt; ([0x35, $which &lt;&lt; 3]);
+    (WFP $which:expr, periph) =&gt; ([0x31, $which &lt;&lt; 3]);
+    // ...
+    (MOV $where:ident, $what:expr) =&gt; {{
+        enum Reg {
+            SAR = 0,
+            CCR = 1,
+            DAR = 2
+        }
+        let b = ($what as u32).to_le_bytes();
+        [0xbc, Reg::$where as u8, b[0], b[1], b[2], b[3]]
+    }};
+}
+</code></pre>
+
+<p>Then, copying the instruction into its designated slot in the buffer (<code>arr</code> here) is as easy as mutating successive slices (<code>arr_sl</code>).</p>
+<pre><code class="language-rust">let arr_sl = &amp;mut arr[..];
+$( // This macro repetition expands over every given instruction
+    let inst_dat = xdmainst!( $inst_name $($inst_param),* );
+    arr_sl[..inst_dat.len()].copy_from_slice(&amp;inst_dat);
+
+    // Update the slice to move onto the next instruction
+    let arr_sl = &amp;mut arr_sl[inst_dat.len()..];
+)+
+drop(arr_sl);
+</code></pre>
+
+<h3>Aside - Handling the DMALP instruction</h3>
+<p>The DMA instruction set additionally includes two instructions, LP and LPEND, which begin and end a loop. This slightly complicates the instruction stream copying, as I have to keep track of the number of bytes between the two instructions to calculate its relative backward jump.</p>
+<p>I keep track of the two available loop counters on the DMA engine, initialize them when I spot a DMALD, and commit them when I spot a DMALDEND.</p>
+<pre><code class="language-rust">// ...
+let mut loop_rel: [Option&lt;u8&gt;; 2] = [None; 2];
+$(
+    let inst_dat = { /* ... */ };
+    arr_sl[..inst_dat.len()].copy_from_slice(&amp;inst_dat);
+
+    loop_rel[0].as_mut().map(|x| *x += xdmainst_size!( $inst_name ));
+    loop_rel[1].as_mut().map(|x| *x += xdmainst_size!( $inst_name ));
+
+    handle_lpend!( &amp;mut loop_rel; arr_sl; $inst_name $($inst_param),* );
+    handle_lp!( &amp;mut loop_rel; $inst_name $($inst_param),* );
+    // ...
+)+
+</code></pre>
+
+<h3>Optimized Rust output</h3>
+<p>Rust's constant folding optimizations do a terrific job of optimizing this control code away. You can see this on the <a href="https://rust.godbolt.org/z/4BA3PE">Godbolt Compiler Browser</a>.</p>
+<h2>Conclusions</h2>
+<p>Rust macros can implement readable assemblers, at least for simple architectures, with relatively little macro code. The assembling process can even hold state in the process, and most of this state handling code will be optimized away during compilation.</p>
+<p>As this method of assembling code never needs to allocate memory, and can never overrun a statically-allocated buffer, this can be an effective tool for embedded firmware or similar applications where <code>alloc</code> is not an option.
+​</p>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width" />
+    <link rel="stylesheet" type="text/css" href="/style.css">
+    <link rel="stylesheet" type="text/css" href="/prism.css">
+    <script src="/prism.js"></script> 
+    <title>Crafting a Rust enum with variants decided at compile-time</title>
+    
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-31609280-3"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-31609280-3');
+</script>
+
+</head>
+<body>
+    <div id="title">
+        <h1>a blog</h1>
+        <p>by <a href="/">
+            Gui Andrade
+        </a></p>
+    </div>
+
+    <h1>Crafting a Rust enum with variants decided at compile-time</h1>
+<h2>Or, creating a higher order 'mapping' type</h2>
+<p>Hacking with some performance-critical Rust code recently, I found myself missing some way to construct an <code>enum</code> with variants decided by type reflection.</p>
+<p>Here's an example of my ideal type (syntax aside):</p>
+<pre><code class="language-rust">struct KeyType1;
+struct KeyType2;
+struct KeyType3;
+struct KeyType4;
+
+tymap Foo&lt;K&gt; for K {
+    KeyType1 =&gt; u32,
+    KeyType2 =&gt; u64,
+    KeyType3 =&gt; u128,
+    KeyType4 =&gt; (u128, u128)
+};
+
+impl&lt;K&gt; Foo&lt;K&gt; {
+    fn positive(&amp;self) -&gt; bool {
+        match K {
+            KeyType1(ref val: u32)          =&gt; val &gt;= 0,
+            KeyType2(ref val: u64)          =&gt; val &gt;= 0,
+            KeyType3(ref val: u128)         =&gt; val &gt;= 0,
+            KeyType4(ref val: (u128, u128)) =&gt; val.0 &gt;= 0,
+        }
+    }
+}
+
+fn main() {
+    let foo = Foo::&lt;KeyType1&gt;::new(0u32);
+    assert!(foo.positive());
+}
+</code></pre>
+
+<h2>But why?</h2>
+<p>Think of it like a nicer version of <a href="https://en.cppreference.com/w/cpp/types/enable_if">C++'s <code>std::enable_if</code></a>.</p>
+<h3>Benefits over wrapping an <code>enum</code></h3>
+<p>In the hot path, every last branch instruction is a potential performance pitfall. Because all the code that runs here is selected at compile-time, the optimizer can erase all reflection, just like using generics.</p>
+<h3>Is this idiomatic? What about traits?</h3>
+<p>Traits would definitely be the idiomatic way to solve this problem. But using a <code>tymap</code> can provide both an <code>enum</code>'s exhaustiveness guarantees and the code monomorphization of traits.</p>
+<p>And, most importantly, the <code>tymap</code> can be stored in <code>struct</code>s without any type erasure or runtime penalty.</p>
+<h2>Implementation</h2>
+<p>Turns out, we can implement something very similar in stable Rust with the help of macros, enums, and a little unsafe code. See <a href="https://github.com/archshift/tyenum">this GitHub repo</a> if you'd like to browse a complete implementation.</p>
+<h3>Storage size and alignment</h3>
+<p>We need our <code>tymap</code> type to be at least as large as the largest variant, with the correct alignment as well. But we won't use a <code>struct</code> with all the variants, because we don't want to waste too much space. A <code>union</code> wouldn't work either, because Rust unions currently only accept <code>Copy</code> variants.</p>
+<p>Fortunately, Rust's <code>enum</code> type already provides us size and alignment guarantees. And we can <a href="https://github.com/rust-lang/rfcs/blob/master/text/2195-really-tagged-unions.md#guide-level-explanation">use <code>#[repr(u8)]</code></a> to allow us to access the enum variant data directly, without caring about the discriminant. This effectively allows us a union without <code>union</code>'s  restrictions:</p>
+<pre><code class="language-rust">#[repr(u8)]
+enum $type_name {
+    $( $key_name ( $val ) ),*
+}
+
+impl $type_name {
+    unsafe fn inner&lt;V: 'static&gt;(&amp;self) -&gt; *const V {
+        #[repr(C)]
+        struct Repr&lt;V&gt; {
+            _discriminiant: u8,
+            _inner: V
+        }
+        let repr_ptr = self as *const Self as *const Repr&lt;V&gt;;
+        &amp;(*repr_ptr)._inner
+    }
+
+    unsafe fn inner_mut&lt;V: 'static&gt;(&amp;mut self) -&gt; *mut V {
+        #[repr(C)]
+        struct Repr&lt;V&gt; {
+            _discriminiant: u8,
+            _inner: V
+        }
+        let repr_ptr = self as *mut Self as *mut Repr&lt;V&gt;;
+        &amp;mut (*repr_ptr)._inner
+    }
+}
+</code></pre>
+
+<h3>Declaring a <code>tymap</code></h3>
+<p>We'll have the following syntax for our <code>tymap</code> macro:</p>
+<pre><code class="language-rust">tymap!(Foo {
+    KeyType1 { val1: u32 },
+    KeyType2 { val2: u64 },
+    KeyType3 { val3: u128 },
+    KeyType4 { val4: (u128, u128) }
+});
+</code></pre>
+
+<p><code>valX</code>, here, is an ident, not a type, and is only used for for variable binding and type parameters; it doesn't provide any additional "information" in the type declaration. </p>
+<p><code>KeyTypeX</code> is both an ident and a type, which unfortunately means that we can only use type names which are also valid idents (but <code>type A = B</code> mitigates this problem).</p>
+<p>It would be nice if these tricks weren't necessary, but these are limitations of <code>macro_rules!</code>. A future iteration could use a procedural macro instead for an even nicer syntax.</p>
+<h3>Constructing a new <code>tymap</code></h3>
+<p>First, let's add the type parameter <code>K</code> to <code>$type_name</code>, as well as the enum variant <code>_hidden(PhantomData&lt;K&gt;)</code>. <code>K</code> will be the currently active "key" of our type mapping.</p>
+<pre><code class="language-rust">impl&lt;K: 'static&gt; $type_name&lt;K&gt; {
+    pub fn new&lt;V: 'static&gt;(v: V) -&gt; Self {
+        // Don't allow the creation of a tymap with an invalid key-value pair.
+        // Would be nice if this could be a static assertion, but TypeId::of isn't a const fn.
+        // This assertion is necessarily optimized away.
+        assert!(
+            $( (TypeId::of::&lt;K&gt;() == TypeId::of::&lt;$key&gt;()
+                &amp;&amp; TypeId::of::&lt;V&gt;() == TypeId::of::&lt;$val&gt;()) )||*
+        );
+
+        let mut out = $type_name::_hidden(PhantomData);
+        unsafe { ptr::write(out.inner_mut(), v) }
+        out
+    }
+}
+</code></pre>
+
+<h3>Implementing <code>match</code></h3>
+<pre><code class="language-rust">// match_ref and match_move follow pretty clearly from the following implementation
+pub fn match_ref_mut
+    &lt;$($VAL: 'static),*, Out&gt;
+    (&amp;mut self, $($val_func: impl FnOnce(&amp;mut $VAL) -&gt; Out),*)
+    -&gt; Out
+{
+    $(
+        /// These if-statements are necessarily optimized away
+        if TypeId::of::&lt;K&gt;() == TypeId::of::&lt;$key&gt;()
+            &amp;&amp; TypeId::of::&lt;$VAL&gt;() == TypeId::of::&lt;$val&gt;() {
+
+            let cast_self = unsafe { &amp;mut *self.inner_mut() };
+            return $val_func(cast_self);
+        }
+    ) else *
+
+    // Again, unfortunate that this can't be a static assertion; optimized away
+    unreachable!();
+}
+
+// Usage
+let is_positive = foo.match_ref(
+    |val: &amp;u32|          =&gt; *val &gt;= 0,
+    |val: &amp;u64|          =&gt; *val &gt;= 0,
+    |val: &amp;u128|         =&gt; *val &gt;= 0,
+    |val: &amp;(u128, u128)| =&gt; *val.0 &gt;= 0,
+);
+</code></pre>
+</body>
+</html>
