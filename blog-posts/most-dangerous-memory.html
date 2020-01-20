@@ -30,7 +30,7 @@
     <h1>The Most Dangerous Memory</h1>
 <p>Recently I embarked on a fun little debugging journey.</p>
 <p>Embedded work, of course. A working debugger? Never heard of one (I could ostensibly use the GDB stub, but setting a breakpoint was liable to crash the whole system about 75% of the time, and otherwise stepping a line took upwards of 30 seconds).</p>
-<hr />
+<p>~</p>
 <p>My story begins with a change to the build environment. Goodbye <code>-O2</code>; hello <code>-O0 -g</code>! The goal’s to use what little remote debugging I have to fix a silly ol’ bug. Easy fix. But now there’s this weird hang just before my program’s supposed to quit.</p>
 <p>Weird. The code sends a message and waits for a reply, which never comes. I look at the thread on the other side. It’s waiting to receive the message. So… the message passing code is broken now? But I haven’t touched it, and it’s been working for just about ever. </p>
 <p>I look a little closer. One thing I can actually reliably do with my debugger is pause, and read out some structures wherever the roulette wheel lands (useful when things hang). Turns out my <code>channel_id</code> is now <code>0</code>. What? When I started executing, it was a nice, friendly <code>149</code>. But something’s reverted it to zero. Is deinitialization happening too early? Nope. Maybe memory corruption?</p>

@@ -103,7 +103,7 @@ drop(arr_sl);
 
 <h3>Aside - Handling the DMALP instruction</h3>
 <p>The DMA instruction set additionally includes two instructions, LP and LPEND, which begin and end a loop. This slightly complicates the instruction stream copying, as I have to keep track of the number of bytes between the two instructions to calculate its relative backward jump.</p>
-<p>I keep track of the two available loop counters on the DMA engine, initialize them when I spot a DMALD, and commit them when I spot a DMALDEND.</p>
+<p>I keep track of the two available loop counters on the DMA engine, initialize them when I spot a DMALP, and commit them when I spot a DMALPEND.</p>
 <pre><code class="language-rust">// ...
 let mut loop_rel: [Option&lt;u8&gt;; 2] = [None; 2];
 $(
