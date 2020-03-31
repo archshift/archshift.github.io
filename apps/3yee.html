@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <title>3yee 3D parametric equation viewer</title>
+    <meta name="description" content="Online 3D parametric equation viewer. 3yee lets you define 3D equations in u, v, and time, and manipulate a first person camera to look from any angle you desire.">
     <style>
       body {
         text-align: center;
@@ -92,6 +93,7 @@
     </style>
 
     <link rel="stylesheet" type="text/css" href="/style.css">
+    <link rel="stylesheet" type="text/css" href="/apps/style.css">
   </head>
   <body class="wide">
     <div id="title">
@@ -112,6 +114,65 @@
 
     <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex=-1></canvas>
 
+    <div class="support-bar">
+      <div class="button-legend">
+        <div class="buttonmap">
+          <div class="button">W</div>
+          <div class="label">Forward</div>
+        </div>
+        
+        <div class="buttonmap">
+          <div class="button">A</div>
+          <div class="label">Left</div>
+        </div>
+        
+        <div class="buttonmap">
+          <div class="button">S</div>
+          <div class="label">Back</div>
+        </div>
+        
+        <div class="buttonmap">
+          <div class="button">D</div>
+          <div class="label">Right</div>
+        </div>
+        
+        <div class="buttonmap">
+          <div class="button">Space</div>
+          <div class="label">Up</div>
+        </div>
+        
+        <div class="buttonmap">
+          <div class="button">Shift</div>
+          <div class="label">Down</div>
+        </div>
+        
+        <div class="buttonmap">
+          <div class="button">↑</div>
+          <div class="label">Cam Up</div>
+        </div>
+        
+        <div class="buttonmap">
+          <div class="button">←</div>
+          <div class="label">Cam Left</div>
+        </div>
+        
+        <div class="buttonmap">
+          <div class="button">↓</div>
+          <div class="label">Cam Down</div>
+        </div>
+        
+        <div class="buttonmap">
+          <div class="button">→</div>
+          <div class="label">Cam Right</div>
+        </div>
+      </div>
+
+      <div style="width: 30ch; text-align: right">
+        Having trouble? <a href="https://get.webgl.org/webgl2/">Check if your browser supports WebGL 2!</a>
+      </div>
+    </div>
+
+
     <h3>Console</h3>
     <textarea id="output" rows="8"></textarea>
 
@@ -128,11 +189,6 @@
           if (element) element.value = ''; // clear browser cache
           return function(text) {
             if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
-            // These replacements are necessary if you render to raw HTML
-            //text = text.replace(/&/g, "&amp;");
-            //text = text.replace(/</g, "&lt;");
-            //text = text.replace(/>/g, "&gt;");
-            //text = text.replace('\n', '<br>', 'g');
             console.log(text);
             if (element) {
               element.value += text + "\n";

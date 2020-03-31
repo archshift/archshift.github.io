@@ -1,0 +1,31 @@
+.support-bar {
+    display: flex;
+    margin: 10pt;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.button-legend {
+    display: flex;
+}
+
+.buttonmap {
+    text-align: center;
+    min-width: 40pt;
+    font-size: 10pt;
+}
+
+.buttonmap .button {
+    margin: auto;
+
+    height: 30pt;
+    width: 30pt;
+    line-height: 30pt;
+    border-radius: 3pt;
+    border: 1px solid #07705B;
+    color: #07705B;
+}
+
+.buttonmap .label {
+    margin: 5pt;
+}
