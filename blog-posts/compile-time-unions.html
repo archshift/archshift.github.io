@@ -27,7 +27,8 @@
         </a></p>
     </div>
 
-    <h1>Crafting a Rust enum with variants decided at compile-time</h1>
+    <div id="post">
+        <h1>Crafting a Rust enum with variants decided at compile-time</h1>
 <h2>Or, creating a higher order 'mapping' type</h2>
 <p>Hacking with some performance-critical Rust code recently, I found myself missing some way to construct an <code>enum</code> with variants decided by type reflection.</p>
 <p>Here's an example of my ideal type (syntax aside):</p>
@@ -161,5 +162,6 @@ let is_positive = foo.match_ref(
     |val: &amp;(u128, u128)| =&gt; *val.0 &gt;= 0,
 );
 </code></pre>
+    </div>
 </body>
 </html>

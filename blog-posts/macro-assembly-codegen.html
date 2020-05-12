@@ -27,7 +27,8 @@
         </a></p>
     </div>
 
-    <h1>Compile-time coprocessor codegen, with Rust macros</h1>
+    <div id="post">
+        <h1>Compile-time coprocessor codegen, with Rust macros</h1>
 <h2>Motivation</h2>
 <p>The Nintendo 3DS uses an ARM standard peripheral, the CoreLink DMA engine, for copying memory among DRAM and memory-mapped peripherals.</p>
 <p>This DMA engine, unlike most other IO devices on the 3DS, actually has its own instruction set where the CPU merely uploads a stream of instructions for the peripheral to execute (other examples of this, on the 3DS, are the DSP audio processor and the PICA graphics chip).</p>
@@ -125,5 +126,6 @@ $(
 <p>Rust macros can implement readable assemblers, at least for simple architectures, with relatively little macro code. The assembling process can even hold state in the process, and most of this state handling code will be optimized away during compilation.</p>
 <p>As this method of assembling code never needs to allocate memory, and can never overrun a statically-allocated buffer, this can be an effective tool for embedded firmware or similar applications where <code>alloc</code> is not an option.
 ​</p>
+    </div>
 </body>
 </html>

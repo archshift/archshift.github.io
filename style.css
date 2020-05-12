@@ -54,6 +54,21 @@ a:hover {
     font-size: 30pt;
 }
 
+#post p img {
+    max-width: 100%;
+    margin: auto;
+    display: block;
+}
+
+#post .caption {
+    border: 1px solid #CCC;
+    border-left: 5px solid black;
+    padding: 2px;
+    text-align: center;
+    font-size: 11pt;
+    font-style: italic;
+}
+
 .blog-box {
     margin: 30pt 0;
 }

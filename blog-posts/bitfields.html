@@ -27,7 +27,8 @@
         </a></p>
     </div>
 
-    <h1>Hacking around the Rust type-system to provide ergonomic bitfields</h1>
+    <div id="post">
+        <h1>Hacking around the Rust type-system to provide ergonomic bitfields</h1>
 <p>So for a while now, I've been trying to figure out how to create a bitfield macro that allows easy, ergonomic use. A few days ago, I found the solution, and now I've published <a href="https://crates.io/crates/bitutils">bitutils</a> to crates.io!</p>
 <h2>Some background</h2>
 <p>I've been working on and off on an emulator for the 3DS' security processor, as well as a test binary that I cross-compile to the ARM9 processor on the 3DS. Both are written in Rust, and both require heavy use of bitfields. I wanted a solution that allowed me to name the individual fields, and to be somewhat ergonomic (my previous solution required me to do <code>bf!( reg.field1 = newval )</code> for instance).</p>
@@ -129,5 +130,6 @@ pub mod BitfieldName {
 <p>But then I remembered. Zero sized types! ZSTs allow me to add functionality to the type system without bloating my bitfield type and while keeping it <code>Copy</code>.</p>
 <p>Additionally, I can cast any pointer to a ZST pointer and have it be a valid representation (since, after all, there's nothing to represent!). So the <code>&amp;self</code> and <code>&amp;mut self</code> in the <code>fieldN</code> types really just point to the <code>Bf</code> struct, and I can pointer cast it right back.</p>
 <p>And then, I added a little <code>Deref</code> trickery to prevent someone from attempting to <code>Copy</code> or move the <code>Fields</code> type out of the <code>Bf</code> struct, which might put them in serious trouble if they called any function with <code>&amp;self</code> type punning!</p>
+    </div>
 </body>
 </html>

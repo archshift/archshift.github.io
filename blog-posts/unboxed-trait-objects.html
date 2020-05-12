@@ -27,7 +27,8 @@
         </a></p>
     </div>
 
-    <h1>Storing unboxed trait objects in Rust</h1>
+    <div id="post">
+        <h1>Storing unboxed trait objects in Rust</h1>
 <p>This blog post will outline the creation of <a href="https://github.com/archshift/dynstack"><code>dynstack</code></a>, a stack datastructure that stores trait objects <em>unboxed</em> to minimize the number of heap allocations necessary.</p>
 <h2>Part 1: Implementing polymorphism</h2>
 <p>Rust, not being an object-oriented language, doesn't quite do inheritence like the others. In C++ or Java, subclasses extend superclasses. In Rust, structs implement traits.</p>
@@ -300,5 +301,6 @@ pseudorecursive2_dynstack  time:   [1.0138 us 1.0159 us 1.0188 us]
 <pre><code>pseudorecursive2_naive     time:   [1.1447 us 1.1455 us 1.1464 us]
 pseudorecursive2_dynstack  time:   [989.59 ns 991.74 ns 995.08 ns]
 </code></pre>
+    </div>
 </body>
 </html>
