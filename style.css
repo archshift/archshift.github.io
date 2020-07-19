@@ -47,6 +47,7 @@ a:hover {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
+    padding-bottom: 20pt;
 }
 
 #title h1 {
