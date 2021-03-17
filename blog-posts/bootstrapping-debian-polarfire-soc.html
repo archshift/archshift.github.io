@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width" />
+    <link rel="stylesheet" type="text/css" href="/style.css">
+    <link rel="stylesheet" type="text/css" href="/prism.css">
+    <script src="/prism.js"></script> 
+    <title>Bootstrapping Debian onto the PolarFire SoC board</title>
+    <meta name="description" content="The PolarFire SoC is an affordable, useful, and widely available Linux-capable RISC-Vboard. Here&#x27;s how you can run Debian on it." />
+    
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-31609280-3"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-31609280-3');
+</script>
+
+    
+</head>
+<body>
+    <div id="title">
+        <div>
+            <h1 style="display: inline">a blog</h1>
+            <a href="/rss">
+                <img src="/rss.png" alt="RSS Feed" height="20pt" style="margin: 0 8pt" />
+            </a>
+        </div>
+        <p>by <a href="/">
+            Gui Andrade
+        </a></p>
+    </div>
+
+    <div id="post">
+        <h1>Bootstrapping Debian onto the PolarFire SoC board</h1>
+<p>Before I start, the standard disclaimers: I take no responsibility if you break your board, etc., etc.</p>
+<p>I was really excited by the possibility of a Debian RISC-V computer where I can even put custom accelerators on its FPGA. Here's how you can do exactly that.</p>
+<p>Beware, it's quite an involved process. And there's one particularly unfortunate issue I haven't had the chance to diagnose yet: for some reason, Linux only activates a single core on the processor.</p>
+<p>That aside, lots of things work quite well. Including package management! So if you're so inclined to try it out, compile away:</p>
+<h2>Compiling software</h2>
+<h4>Building firmware</h4>
+<pre><code class="language-language-bash"># DEPENDENCIES:
+# pip install kconfiglib
+# riscv64-unknown-linux-gnu-gcc
+
+git clone https://github.com/archshift/hart-software-services
+cp boards/mpfs-icicle-kit-es/def_config .config
+
+# Enable booting from SPI Flash
+echo &quot;CONFIG_SERVICE_BOOT_SPI_FLASH=0x400&quot; &gt;&gt; .config
+
+make BOARD=mpfs-icicle-kit-es CROSS_COMPILE=riscv64-unknown-linux-gnu-
+</code></pre>
+<h4>Building U-Boot</h4>
+<p>TODO. I built U-Boot from <a href="https://github.com/polarfire-soc/meta-polarfire-soc-yocto-bsp/">Microchip's Yocto configuration</a>.</p>
+<p>Once you have a <code>u-boot.elf</code> file, do the following:</p>
+<pre><code class="language-language-bash"># Define the payload configuration
+cat &lt;&lt;EOT &gt;&gt; ubootcfg.yaml
+set-name: 'PolarFire-SoC-HSS::U-Boot'
+hart-entry-points: {u54_1: '0x80000000', u54_2: '0x80000000', u54_3: '0x80000000', u54_4: '0x80000000'}
+payloads:
+  u-boot.elf:    {exec-addr: '0x80000000', owner-hart: u54_1, secondary-hart: u54_2, secondary-hart: u54_3, secondary-hart: u54_4, priv-mode: prv_m}
+EOT
+
+# We need this tool to create a bootloader payload
+pushd hart-software-services/tools/hss-payload-generator
+make
+popd
+
+# Create the payload
+hart-software-services/tools/hss-payload-generator/hss-payload-generator -c ./ubootcfg.yaml uboot-payload.bin
+
+# Convert the payload to the INTEL HEX format our flashing tool expects
+bincopy convert -i binary -o ihex uboot-payload.bin uboot-payload.hex
+</code></pre>
+<h4>Building Linux</h4>
+<pre><code class="language-language-bash">git clone --depth 1 --branch v5.6.16 https://github.com/gregkh/linux
+cd linux
+git clone https://github.com/archshift/polarfire-linux buildsh
+
+# Patch the kernel for PolarFire SoC
+./buildsh/patch.sh
+# Configure the kernel. You can leave the settings as they are and activate &quot;Save&quot;.
+./buildsh/menuconfig.sh
+# Build images
+./buildsh/mk-images.sh
+</code></pre>
+<h2>Creating disk image</h2>
+<h3>Initialize image</h3>
+<pre><code class="language-language-bash"># Initialize disk image
+dd if=/dev/zero bs=1M count=2048 of=drive.img
+# Partition the disk
+fdisk drive.img
+&gt; g # make GPT table
+&gt; n # new partition, give it +256MB
+&gt; t # change partition type, use type 1: EFI system partition
+&gt; n # new partition, give it the remaining space
+&gt; w # write changes
+
+# Give the disk image loop devices /dev/loop0 (boot partition) and /dev/loop1 (root partition)
+sudo losetup -Pf drive.img
+# Make the filesystems
+sudo mkfs.fat /dev/loop0p1
+sudo mkfs.ext4 /dev/loop0p2
+</code></pre>
+<h3>Copy boot images</h3>
+<pre><code class="language-language-bash"># Mount the partition
+mkdir /tmp/boot
+sudo mount /dev/loop0p1 /tmp/boot
+
+sudo cp fitImage boot.scr.uimg /tmp/boot
+
+# Unmount
+sudo umount /tmp/boot
+</code></pre>
+<h3>Debootstrap</h3>
+<pre><code class="language-language-bash"># Mount the partition
+mkdir /tmp/root
+sudo mount /dev/loop0p2 /tmp/root
+
+# Install essential packages
+EXTRA_PKGS=ssh,nano,curl,build-essential,debian-ports-archive-keyring,sudo,tmux
+sudo debootstrap --foreign --arch riscv64 --include=$EXTRA_PKGS sid /tmp/root http://deb.debian.org/debian-ports/
+
+# Install fstab
+echo &quot;/dev/mmcblk0p1         /boot        vfat          defaults         0      2&quot; &gt; /tmp/root/etc/fstab
+echo &quot;/dev/mmcblk0p2         /            ext4          defaults         0      1&quot; &gt;&gt; /tmp/root/etc/fstab
+
+# Unmount
+sudo umount /tmp/root
+</code></pre>
+<h3>Keep configuring with QEMU</h3>
+<pre><code class="language-language-bash"># Note that you're going to need the uncompressed kernel image here.
+KERNEL=path/to/kernel/arch/riscv/boot/Image
+qemu-system-riscv64 -M virt -m 1024 -smp 5 -display none \
+    -serial stdio -drive file=drive.img,format=raw,id=hd0 \
+    -device virtio-blk-device,drive=hd0 -append &quot;root=/dev/vda2 rw&quot; \
+    -kernel &quot;$KERNEL&quot; -netdev user,id=net0 \
+    -device virtio-net-device,netdev=net0
+</code></pre>
+<h4>Install cached packages</h4>
+<pre><code class="language-language-bash">export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+# debootstrap doesn't install everything, but it'll download them to the cache. Manually install them now.
+dpkg -i -E /var/cache/apt/archives/*.deb
+# We'll still have broken packages after this step but the necessary utilities for networking should be installed.
+
+sync
+# Reboot now
+</code></pre>
+<h4>Final system fixes</h4>
+<pre><code class="language-language-bash"># Enable networking
+dhclient
+
+# Fix broken packages
+apt --fix-broken install
+# Do it twice to make sure no stragglers stay unconfigured
+apt --fix-broken install
+
+# Ensure all the extra packages we wanted are now installed
+apt install ssh nano curl build-essential debian-ports-archive-keyring sudo tmux
+
+# Enable systemd
+ln -s /lib/systemd/systemd /sbin/init
+
+# DON'T FORGET TO DO THIS NOW
+passwd root
+
+sync
+# Close QEMU now
+</code></pre>
+<p>There you go! Now you should have a fully functional <code>drive.img</code>.</p>
+<h2>Installing</h2>
+<h3>Installing firmware</h3>
+<p>You will need to copy the firmware payload into the SoC's eNVM flash.</p>
+<p>For this you will have the misfortune of using <a href="https://www.microsemi.com/product-directory/design-resources/1750-libero-soc">Libero</a>, Microchip's FPGA development platform, or <a href="https://www.microsemi.com/product-directory/design-tools/4879-softconsole">SoftConsole</a>, their firmware development platform. You might be able to also use a JTAG debugger for this, but I'm only familiar with Libero, so that's the tool I'll describe.</p>
+<p>Clone the <a href="https://github.com/polarfire-soc/icicle-kit-reference-design">Icicle Kit reference design</a> and open Libero. Click <code>Project-&gt;Execute Script</code>, and select <code>ICICLE_KIT_eMMC.tcl</code> under the reference design. This should populate a project.</p>
+<p>On the left sidebar, under <code>Program Design</code>, click <code>Generate FPGA Array Data</code>. This will take a long time. Then, <code>Configure Design Initialization Data and Memories</code>. A new view will pop up. Click the <code>eNVM</code> tab.</p>
+<p>Click the <code>Add</code> button, and select <code>Add Boot Mode 1 Client</code>. Navigate to the <code>hart-software-services/Default</code> directory from "Building firmware". Select <code>hss.hex</code>. Click OK.</p>
+<p>On the left sidebar, under <code>Program Design</code>, click <code>Generate Bitstream</code>. If all goes well, you can then proceed to click <code>Run PROGRAM Action</code>, which will transfer the firmware to your board.</p>
+<h3>Installing U-Boot</h3>
+<p>You will need to copy the U-Boot payload into the board's SPI Flash memory at the address <code>0x400</code>.</p>
+<p>Again, for this you will have the misfortune of using <a href="https://www.microsemi.com/product-directory/design-resources/1750-libero-soc">Libero</a>. If you have a JTAG debugger, you can avoid Libero, but I'm not familiar with that process.</p>
+<p>Assuming you've done everything in "Installing firmware" above, once again click <code>Configure Design Initialization Data and Memories</code>. Navigate to the <code>SPI Flash</code> tab.</p>
+<p>First, use the drop-down to reconfigure the SPI Flash to the correct size: <code>1,048,576 KB</code>. Then click <code>Add-&gt;Add Data Storage Client</code>. Select the <code>uboot-payload.hex</code> file from "Building U-Boot."</p>
+<p>On the left sidebar, under <code>Program SPI Flash Image</code>, click <code>Generate SPI Flash Image</code>. If all goes well, you can then proceed to click <code>Run PROGRAM_SPI_IMAGE Action</code>, which will transfer the bootloader to your board.</p>
+<h3>Installing Linux</h3>
+<pre><code class="language-language-bash"># Access the boot monitor
+sudo screen /dev/ttyUSB0 115200
+
+# Reboot the board, then press any key to stop booting.
+# Make the NAND available as a USB device.
+&gt; usbdmsc
+</code></pre>
+<pre><code class="language-language-bash"># Find the block device that corresponds to your NAND flash. It should be 8GB.
+sudo fdisk -l
+# Copy the NAND image.
+sudo dd if=drive.img of=/dev/sdXY
+</code></pre>
+    </div>
+</body>
+</html>
